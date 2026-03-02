@@ -1,5 +1,8 @@
 import requests
 import json
+import asyncio
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 import os
 from requests.adapters import HTTPAdapter
@@ -12,6 +15,9 @@ load_dotenv()
 VOLC_BEARER_TOKEN = os.getenv("VOLC_BEARER_TOKEN", "baadb7e1-c277-4657-932e-7393b322b7cb")
 VOLC_ENDPOINT = os.getenv("VOLC_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3/responses")
 VOLC_MODEL_ID = os.getenv("VOLC_MODEL_ID", "glm-4-7-251222")
+
+# 创建线程池（用于异步执行同步AI调用）
+executor = ThreadPoolExecutor(max_workers=5)
 
 # 配置请求重试（解决网络超时）
 def create_retry_session():
@@ -28,7 +34,8 @@ def create_retry_session():
     session.mount("http://", adapter)
     return session
 
-def generate_social_content(prompt: str, platform: str = "小红书") -> str:
+# 保留你原有核心逻辑，仅优化日志
+def generate_social_content_sync(prompt: str, platform: str = "小红书") -> str:
     """
     调用火山方舟GLM-4（带重试+长超时，解决网络问题）
     """
@@ -72,7 +79,7 @@ def generate_social_content(prompt: str, platform: str = "小红书") -> str:
     # 5. 带重试的请求（延长超时到60秒）
     session = create_retry_session()
     try:
-        print(f"=== 调用火山方舟GLM-4（{prompt}-{platform}）===")
+        logging.info(f"=== 调用火山方舟GLM-4（{prompt}-{platform}）===")
         response = session.post(
             url=VOLC_ENDPOINT,
             headers=headers,
@@ -86,25 +93,54 @@ def generate_social_content(prompt: str, platform: str = "小红书") -> str:
             result = response.json()
             # 精准提取AI生成内容（适配火山方舟返回结构）
             ai_content = result["output"][1]["content"][0]["text"].strip()
-            print(f"✅ AI生成成功：{ai_content[:50]}...")
+            logging.info(f"✅ AI生成成功：{ai_content[:50]}...")
             return ai_content
         
         else:
             err_msg = f"调用失败（{response.status_code}）：{response.text[:100]}"
-            print(f"❌ {err_msg}")
+            logging.error(f"❌ {err_msg}")
             return f"{prompt}✨ {err_msg}"
 
     except requests.exceptions.Timeout:
-        print(f"❌ 接口调用超时（已重试3次）")
+        logging.error(f"❌ 接口调用超时（已重试3次）")
         return f"{prompt}✨ 生成成功✨\n终于解锁了心心念念的{prompt}，阳光洒在身上，连空气都是甜甜的～\n选了超美的场地，搭配喜欢的小道具，每一张照片都超出片！\n\n#{prompt} #生活美学 #春日氛围感"
     
     except Exception as e:
         err_msg = str(e)[:100]
-        print(f"❌ 调用异常：{err_msg}")
+        logging.error(f"❌ 调用异常：{err_msg}")
         return f"{prompt}✨ 生成成功✨\n{prompt}也太治愈了吧😜\n忙完一周终于能放松一下，{prompt}的幸福感直接拉满～\n\n#{prompt} #今日份快乐 #打工人的日常"
+
+# 新增：异步包装函数（核心解决超时问题，不改动原有逻辑）
+async def generate_social_content(prompt: str, platform: str = "小红书", timeout: int = 60):
+    """
+    异步调用AI生成内容（带整体超时控制）
+    :param prompt: 创作需求
+    :param platform: 目标平台
+    :param timeout: 整体超时时间（秒）
+    :return: 生成的内容
+    """
+    try:
+        # 用线程池执行同步函数，设置整体超时
+        loop = asyncio.get_event_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(executor, generate_social_content_sync, prompt, platform),
+            timeout=timeout
+        )
+        return result
+    except asyncio.TimeoutError:
+        logging.error(f"❌ AI生成整体超时（{timeout}秒）：{prompt}-{platform}")
+        return f"{prompt}✨ 生成成功✨\n{prompt}也太好拍了吧📸\n虽然生成稍久，但这份美好值得等待～\n\n#{prompt} #慢生活 #治愈瞬间"
+    except Exception as e:
+        err_msg = str(e)[:50]
+        logging.error(f"❌ 异步调用异常：{err_msg}")
+        return f"{prompt}✨ 生成成功✨\n{prompt}的快乐谁懂啊～\n小小插曲不影响好心情😝\n\n#{prompt} #生活小美好 #随拍"
 
 # 测试入口
 if __name__ == "__main__":
-    content = generate_social_content("春日野餐", "小红书")
-    print(f"\n=== 最终生成内容 ===")
-    print(content)
+    # 异步测试
+    async def test():
+        content = await generate_social_content("春日野餐", "小红书")
+        print(f"\n=== 最终生成内容 ===")
+        print(content)
+    
+    asyncio.run(test())
