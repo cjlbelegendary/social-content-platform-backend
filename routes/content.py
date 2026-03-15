@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from models import Content
+from models import Content, Session as SessionModel
 from routes.user import get_db
 from utils.auth import get_current_user
 from utils.ai_helper import generate_social_content, generate_social_content_stream  # 导入异步函数和流式函数
@@ -17,6 +17,7 @@ async def generate_content(  # 仅加async关键字
     prompt: str = Body(...),
     platform: str = Body(default="小红书"),
     title: str = Body(...),
+    session_id: int = Body(None, description="会话ID，不提供则创建新会话"),
     db = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
@@ -25,9 +26,26 @@ async def generate_content(  # 仅加async关键字
         # 1. 调用异步AI生成函数（60秒超时）
         ai_content = await generate_social_content(prompt, platform, timeout=60)
         
-        # 2. 保存到数据库
+        # 2. 处理会话
+        if session_id:
+            # 验证会话是否存在且属于当前用户
+            session = db.query(SessionModel).filter(SessionModel.id == session_id, SessionModel.user_id == user_id).first()
+            if not session:
+                raise HTTPException(status_code=400, detail="会话不存在或无权限访问")
+        else:
+            # 创建新会话
+            session = SessionModel(
+                user_id=user_id,
+                title=title
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        
+        # 3. 保存到数据库
         new_content = Content(
             user_id=user_id,
+            session_id=session.id,
             title=title,
             content=ai_content,
             platform=platform,
@@ -42,12 +60,15 @@ async def generate_content(  # 仅加async关键字
             "msg": "生成成功",
             "content": {
                 "id": new_content.id,
+                "session_id": session.id,
                 "title": new_content.title,
                 "content": new_content.content,
                 "platform": new_content.platform,
                 "create_time": new_content.create_time.strftime("%Y-%m-%d %H:%M:%S")
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"生成内容异常：{str(e)}")
         return {
@@ -56,27 +77,82 @@ async def generate_content(  # 仅加async关键字
             "content": None
         }
 
-# 2. 查询用户的所有内容
+# 2. 查询用户的所有会话（只返回会话基本信息）
 @router.get("/list")
 async def get_content_list(  # 加async（可选，不影响功能）
     db = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
-    contents = db.query(Content).filter(Content.user_id == user_id).order_by(Content.create_time.desc()).all()
-    
-    content_list = []
-    for c in contents:
-        content_list.append({
-            "id": c.id,
-            "title": c.title,
-            "content": c.content,
-            "platform": c.platform,
-            "create_time": c.create_time.strftime("%Y-%m-%d %H:%M:%S")
-        })
-    
-    return {"code": 200, "content_list": content_list}
+    try:
+        # 查询用户的所有会话
+        sessions = db.query(SessionModel).filter(SessionModel.user_id == user_id).order_by(SessionModel.update_time.desc()).all()
+        
+        session_list = []
+        for session in sessions:
+            # 只返回会话基本信息
+            session_list.append({
+                "session_id": session.id,
+                "session_title": session.title,
+                "create_time": session.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "update_time": session.update_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        return {"code": 200, "session_list": session_list}
+    except Exception as e:
+        logging.error(f"获取会话列表异常：{str(e)}")
+        return {
+            "code": 500,
+            "msg": "获取会话列表失败，请稍后重试",
+            "session_list": []
+        }
 
-# 3. 删除指定内容
+# 3. 查询指定会话的详细信息（包含会话下的所有内容）
+@router.get("/session/{session_id}")
+async def get_session_detail(
+    session_id: int,
+    db = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    try:
+        # 验证会话是否存在且属于当前用户
+        session = db.query(SessionModel).filter(SessionModel.id == session_id, SessionModel.user_id == user_id).first()
+        if not session:
+            raise HTTPException(status_code=400, detail="会话不存在或无权限访问")
+        
+        # 查询会话下的所有内容
+        contents = db.query(Content).filter(Content.session_id == session_id).order_by(Content.create_time.desc()).all()
+        
+        content_list = []
+        for c in contents:
+            content_list.append({
+                "id": c.id,
+                "title": c.title,
+                "content": c.content,
+                "platform": c.platform,
+                "create_time": c.create_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        return {
+            "code": 200,
+            "session": {
+                "session_id": session.id,
+                "session_title": session.title,
+                "create_time": session.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "update_time": session.update_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "contents": content_list
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"获取会话详情异常：{str(e)}")
+        return {
+            "code": 500,
+            "msg": "获取会话详情失败，请稍后重试",
+            "session": None
+        }
+
+# 4. 删除指定内容
 @router.post("/delete")
 async def delete_content(  # 加async（可选）
     content_id: int = Body(...),
@@ -92,12 +168,13 @@ async def delete_content(  # 加async（可选）
     
     return {"code": 200, "msg": "删除成功"}
 
-# 4. 流式生成内容接口
+# 5. 流式生成内容接口
 @router.post("/generate/stream")
 async def generate_content_stream(
     prompt: str = Body(...),
     platform: str = Body(default="小红书"),
     title: str = Body(...),
+    session_id: int = Body(None, description="会话ID，不提供则创建新会话"),
     db = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
@@ -106,6 +183,22 @@ async def generate_content_stream(
     print(f"流式接口被调用：prompt={prompt}, platform={platform}, user_id={user_id}")
     print("====================================")
     try:
+        # 处理会话
+        if session_id:
+            # 验证会话是否存在且属于当前用户
+            session = db.query(SessionModel).filter(SessionModel.id == session_id, SessionModel.user_id == user_id).first()
+            if not session:
+                raise HTTPException(status_code=400, detail="会话不存在或无权限访问")
+        else:
+            # 创建新会话
+            session = SessionModel(
+                user_id=user_id,
+                title=title
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        
         # 用于收集完整的生成内容
         full_content = []
         
@@ -132,6 +225,7 @@ async def generate_content_stream(
                 # 保存到数据库
                 new_content = Content(
                     user_id=user_id,
+                    session_id=session.id,
                     title=title,
                     content=ai_content,
                     platform=platform,
@@ -156,6 +250,8 @@ async def generate_content_stream(
         )
         print(f"StreamingResponse创建成功：{response}")
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"流式生成内容异常：{str(e)}")
         # 出错时返回错误信息
