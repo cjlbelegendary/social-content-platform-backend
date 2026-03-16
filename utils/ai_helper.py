@@ -110,15 +110,27 @@ def process_stream_content(text, platform):
                 time.sleep(0.05)
 
 # 保留你原有核心逻辑，仅优化日志
-def generate_social_content_sync(prompt: str, platform: str = "小红书") -> str:
+def generate_social_content_sync(prompt: str, platform: str = "小红书", session_history: list = None) -> str:
     """
     调用火山方舟GLM-4（带重试+长超时，解决网络问题）
+    :param prompt: 创作需求
+    :param platform: 目标平台
+    :param session_history: 会话历史，格式为[{"role": "user/assistant", "content": "内容"}]
     """
     # 1. 基础校验
     if not prompt or prompt.strip() in ["string", "请输入创作需求"]:
         return "请输入具体的创作需求（比如：春日野餐、职场穿搭），我会为你生成适配平台的优质内容～"
 
     # 2. 构造提示词
+    history_text = ""
+    if session_history:
+        history_text = "\n\n# 会话历史：\n"
+        for item in session_history:
+            if item.get("role") == "user":
+                history_text += f"用户：{item.get('content')}\n"
+            elif item.get("role") == "assistant":
+                history_text += f"助手：{item.get('content')}\n"
+
     user_prompt = f"""你是专业的社交内容生成专家，严格按以下要求生成内容：
 1. 适配平台：{platform}
 2. 创作需求：{prompt}
@@ -127,7 +139,8 @@ def generate_social_content_sync(prompt: str, platform: str = "小红书") -> st
    - 微博：50-100字，带1-2个话题标签，风格活泼有趣；
    - 朋友圈：30-80字，无话题标签，风格温馨生活化；
 4. 仅返回适配{platform}平台的内容，不要返回其他平台的内容；
-5. 仅返回生成的内容，无任何额外解释、备注、格式标记。"""
+5. 仅返回生成的内容，无任何额外解释、备注、格式标记；
+6. 参考会话历史，保持内容的连贯性和一致性。{history_text}"""
 
     # 3. 构造请求体
     request_body = {
@@ -202,19 +215,20 @@ def generate_social_content_sync(prompt: str, platform: str = "小红书") -> st
         return f"{prompt}✨ 生成成功✨\n{prompt}也太治愈了吧😜\n忙完一周终于能放松一下，{prompt}的幸福感直接拉满～\n\n#{prompt} #今日份快乐 #打工人的日常"
 
 # 新增：异步包装函数（核心解决超时问题，不改动原有逻辑）
-async def generate_social_content(prompt: str, platform: str = "小红书", timeout: int = 60):
+async def generate_social_content(prompt: str, platform: str = "小红书", timeout: int = 60, session_history: list = None):
     """
     异步调用AI生成内容（带整体超时控制）
     :param prompt: 创作需求
     :param platform: 目标平台
     :param timeout: 整体超时时间（秒）
+    :param session_history: 会话历史，格式为[{"role": "user/assistant", "content": "内容"}]
     :return: 生成的内容
     """
     try:
         # 用线程池执行同步函数，设置整体超时
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
-            loop.run_in_executor(executor, generate_social_content_sync, prompt, platform),
+            loop.run_in_executor(executor, generate_social_content_sync, prompt, platform, session_history),
             timeout=timeout
         )
         return result
@@ -227,11 +241,12 @@ async def generate_social_content(prompt: str, platform: str = "小红书", time
         return f"{prompt}✨ 生成成功✨\n{prompt}的快乐谁懂啊～\n小小插曲不影响好心情😝\n\n#{prompt} #生活小美好 #随拍"
 
 # 新增：流式生成函数
-def generate_social_content_stream(prompt: str, platform: str = "小红书"):
+def generate_social_content_stream(prompt: str, platform: str = "小红书", session_history: list = None):
     """
     流式调用火山方舟GLM-4
     :param prompt: 创作需求
     :param platform: 目标平台
+    :param session_history: 会话历史，格式为[{"role": "user/assistant", "content": "内容"}]
     :return: 生成器，逐块返回内容
     """
     # 1. 基础校验
@@ -240,6 +255,15 @@ def generate_social_content_stream(prompt: str, platform: str = "小红书"):
         return
 
     # 2. 构造提示词
+    history_text = ""
+    if session_history:
+        history_text = "\n\n# 会话历史：\n"
+        for item in session_history:
+            if item.get("role") == "user":
+                history_text += f"用户：{item.get('content')}\n"
+            elif item.get("role") == "assistant":
+                history_text += f"助手：{item.get('content')}\n"
+
     user_prompt = f"""你是专业的社交内容生成专家，严格按以下要求生成内容：
 1. 适配平台：{platform}
 2. 创作需求：{prompt}
@@ -248,7 +272,8 @@ def generate_social_content_stream(prompt: str, platform: str = "小红书"):
    - 微博：50-100字，带1-2个话题标签，风格活泼有趣；
    - 朋友圈：30-80字，无话题标签，风格温馨生活化；
 4. 仅返回适配{platform}平台的内容，不要返回其他平台的内容；
-5. 仅返回生成的内容，无任何额外解释、备注、格式标记。"""
+5. 仅返回生成的内容，无任何额外解释、备注、格式标记；
+6. 参考会话历史，保持内容的连贯性和一致性。{history_text}"""
 
     # 3. 构造请求体
     request_body = {

@@ -23,10 +23,7 @@ async def generate_content(  # 仅加async关键字
 ):
     """生成社交内容（异步版，解决超时）"""
     try:
-        # 1. 调用异步AI生成函数（60秒超时）
-        ai_content = await generate_social_content(prompt, platform, timeout=60)
-        
-        # 2. 处理会话
+        # 1. 处理会话
         if session_id:
             # 验证会话是否存在且属于当前用户
             session = db.query(SessionModel).filter(SessionModel.id == session_id, SessionModel.user_id == user_id).first()
@@ -41,6 +38,23 @@ async def generate_content(  # 仅加async关键字
             db.add(session)
             db.commit()
             db.refresh(session)
+        
+        # 2. 获取会话历史
+        session_history = []
+        if session_id:
+            # 查询会话下的所有内容，按创建时间排序
+            contents = db.query(Content).filter(Content.session_id == session_id).order_by(Content.create_time.desc()).limit(5).all()
+            # 反转顺序，使最早的消息在前
+            contents.reverse()
+            for content in contents:
+                # 每个内容作为一条助手消息
+                session_history.append({
+                    "role": "assistant",
+                    "content": content.content
+                })
+        
+        # 3. 调用异步AI生成函数（60秒超时）
+        ai_content = await generate_social_content(prompt, platform, timeout=60, session_history=session_history)
         
         # 3. 保存到数据库
         new_content = Content(
@@ -199,6 +213,20 @@ async def generate_content_stream(
             db.commit()
             db.refresh(session)
         
+        # 获取会话历史
+        session_history = []
+        if session_id:
+            # 查询会话下的所有内容，按创建时间排序
+            contents = db.query(Content).filter(Content.session_id == session_id).order_by(Content.create_time.desc()).limit(5).all()
+            # 反转顺序，使最早的消息在前
+            contents.reverse()
+            for content in contents:
+                # 每个内容作为一条助手消息
+                session_history.append({
+                    "role": "assistant",
+                    "content": content.content
+                })
+        
         # 用于收集完整的生成内容
         full_content = []
         
@@ -208,7 +236,7 @@ async def generate_content_stream(
             print("开始生成内容...")
             # 调用流式生成函数
             print("调用generate_social_content_stream函数...")
-            for chunk in generate_social_content_stream(prompt, platform):
+            for chunk in generate_social_content_stream(prompt, platform, session_history=session_history):
                 print(f"生成内容块：{chunk}")
                 # 收集内容块
                 full_content.append(chunk)
