@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 # 新增：导入FastAPI的Header和HTTPException（用于从请求头获取token）
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Depends
+from sqlalchemy.orm import Session
 
 load_dotenv()
 
@@ -102,3 +103,54 @@ def get_current_user(Authorization: str = Header(None)) -> int:
     # 4. 验证成功，返回用户ID
     logging.info(f"请求头Token验证成功：user_id={user_id}")
     return user_id
+
+# ===================== 新增：获取当前管理员用户 =====================
+def get_current_admin(Authorization: str = Header(None), db: Session = None, raise_error: bool = True) -> int:
+    """
+    从请求头获取并验证管理员身份
+    :param Authorization: 请求头中的Authorization字段
+    :param db: 数据库会话
+    :param raise_error: 是否在验证失败时抛出错误，默认True
+    :return: 验证成功返回user_id，失败时根据raise_error决定是否抛出错误
+    """
+    try:
+        # 1. 先获取当前用户
+        user_id = get_current_user(Authorization)
+        
+        # 2. 验证数据库会话是否提供
+        if not db:
+            logging.error("管理员权限验证失败：数据库会话未提供")
+            if raise_error:
+                raise HTTPException(
+                    status_code=500,
+                    detail="服务器内部错误"
+                )
+            return None
+        
+        # 3. 验证用户是否是管理员
+        from models import User
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not user.is_admin:
+            logging.error(f"管理员权限验证失败：user_id={user_id}, is_admin={user.is_admin if user else 'None'}")
+            if raise_error:
+                raise HTTPException(
+                    status_code=403,
+                    detail="无管理员权限"
+                )
+            return None
+        
+        # 4. 验证成功，返回用户ID
+        logging.info(f"管理员权限验证成功：user_id={user_id}")
+        return user_id
+    except HTTPException:
+        if raise_error:
+            raise
+        return None
+    except Exception as e:
+        logging.error(f"管理员权限验证异常：{str(e)}")
+        if raise_error:
+            raise HTTPException(
+                status_code=500,
+                detail="服务器内部错误"
+            )
+        return None

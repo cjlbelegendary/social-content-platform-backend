@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Header
 from sqlalchemy.orm import Session
 from models import User, Content
 from routes.user import get_db
-from utils.auth import verify_token
+from utils.auth import verify_token, get_current_admin
 
 # 初始化路由
 router = APIRouter(prefix="/admin", tags=["管理员接口"])
@@ -62,3 +62,40 @@ def get_all_contents(
         })
     
     return {"code": 200, "content_list": content_list}
+
+# 4. 管理员身份校验接口
+@router.get("/validate")
+def validate_admin(
+    db = Depends(get_db),
+    Authorization: str = Header(None),
+    raise_error: bool = True
+):
+    """
+    管理员身份校验接口
+    使用Authorization请求头进行身份验证
+    
+    :param raise_error: 是否在验证失败时抛出错误，默认True
+    """
+    # 验证管理员身份
+    admin_id = get_current_admin(Authorization=Authorization, db=db, raise_error=raise_error)
+    
+    if not admin_id:
+        # 验证失败且不抛出错误的情况
+        return {
+            "code": 403,
+            "msg": "无管理员权限",
+            "admin_info": None
+        }
+    
+    # 获取管理员信息
+    admin = db.query(User).filter(User.id == admin_id).first()
+    
+    return {
+        "code": 200,
+        "msg": "管理员身份验证成功",
+        "admin_info": {
+            "user_id": admin.id,
+            "username": admin.username,
+            "is_admin": admin.is_admin
+        }
+    }
