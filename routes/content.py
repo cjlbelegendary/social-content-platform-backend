@@ -182,7 +182,98 @@ async def delete_content(  # 加async（可选）
     
     return {"code": 200, "msg": "删除成功"}
 
-# 5. 流式生成内容接口
+# 6. 获取所有生成内容（支持筛选和分页）
+@router.get("/contents")
+async def get_all_contents(
+    platform: str = None,  # 平台筛选
+    session_id: int = None,  # 会话ID筛选
+    start_time: str = None,  # 开始时间（格式：2024-01-01）
+    end_time: str = None,  # 结束时间（格式：2024-01-31）
+    title: str = None,  # 标题关键词筛选
+    content: str = None,  # 内容关键词筛选
+    page: int = 1,  # 页码，默认1
+    page_size: int = 10,  # 每页数量，默认10
+    db = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    """
+    获取所有生成内容（支持筛选和分页）
+    用于内容管理页面
+    """
+    try:
+        # 构建查询
+        query = db.query(Content).filter(Content.user_id == user_id)
+        
+        # 应用筛选条件
+        if platform:
+            query = query.filter(Content.platform == platform)
+        
+        if session_id:
+            query = query.filter(Content.session_id == session_id)
+        
+        if start_time:
+            # 筛选开始时间之后的内容
+            start_date = datetime.datetime.strptime(start_time, "%Y-%m-%d")
+            query = query.filter(Content.create_time >= start_date)
+        
+        if end_time:
+            # 筛选结束时间之前的内容
+            end_date = datetime.datetime.strptime(end_time, "%Y-%m-%d")
+            # 加上一天，使其包含结束日期的所有时间
+            end_date = end_date + datetime.timedelta(days=1)
+            query = query.filter(Content.create_time < end_date)
+        
+        if title:
+            # 筛选标题包含关键词的内容
+            query = query.filter(Content.title.contains(title))
+        
+        if content:
+            # 筛选内容包含关键词的内容
+            query = query.filter(Content.content.contains(content))
+        
+        # 计算总数
+        total = query.count()
+        
+        # 计算分页
+        offset = (page - 1) * page_size
+        contents = query.order_by(Content.create_time.desc()).offset(offset).limit(page_size).all()
+        
+        # 构建响应数据
+        content_list = []
+        for content in contents:
+            # 获取会话信息
+            session = db.query(SessionModel).filter(SessionModel.id == content.session_id).first()
+            session_title = session.title if session else ""
+            
+            content_list.append({
+                "id": content.id,
+                "session_id": content.session_id,
+                "session_title": session_title,
+                "title": content.title,
+                "content": content.content,
+                "platform": content.platform,
+                "create_time": content.create_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        return {
+            "code": 200,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "content_list": content_list
+        }
+    except Exception as e:
+        logging.error(f"获取内容列表异常：{str(e)}")
+        return {
+            "code": 500,
+            "msg": "获取内容列表失败，请稍后重试",
+            "total": 0,
+            "page": 1,
+            "page_size": 10,
+            "content_list": []
+        }
+
+# 9. 流式生成内容接口
 @router.post("/generate/stream")
 async def generate_content_stream(
     prompt: str = Body(...),

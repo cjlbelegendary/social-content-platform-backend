@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base, User, Session, Content
+from models import Base, User, Session, Content, Schedule
 import os
 from dotenv import load_dotenv
 
@@ -21,3 +21,4 @@ print("创建的表：")
 print("- users (用户表)")
 print("- sessions (会话表)")
 print("- contents (内容表)")
+print("- schedules (排期表)")

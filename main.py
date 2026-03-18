@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # 解决跨域问题
-from routes import user, content, admin
+from routes import user, content, admin, schedule
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -21,6 +21,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(user.router, prefix="/api")
 app.include_router(content.router, prefix="/api")
+app.include_router(schedule.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 
 # 测试接口（验证服务是否启动）

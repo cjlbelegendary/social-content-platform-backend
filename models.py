@@ -33,3 +33,17 @@ class Content(Base):
     content = Column(Text, nullable=False, comment="生成的内容")
     platform = Column(String(20), comment="适配平台：小红书/微博/朋友圈")
     create_time = Column(DateTime, default=datetime.now, comment="创建时间")
+
+# 排期表模型
+class Schedule(Base):
+    __tablename__ = "schedules"
+    id = Column(Integer, primary_key=True, index=True, comment="排期唯一标识")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="关联用户ID，排期所属用户")
+    content_id = Column(Integer, ForeignKey("contents.id"), nullable=False, comment="内容ID")
+    platform = Column(String(20), nullable=False, comment="平台")
+    publish_time = Column(DateTime, nullable=False, comment="发布时间")
+    status = Column(String(20), default="pending", comment="发布状态：pending（待发布）、published（已发布）、failed（发布失败）")
+    schedule_note = Column(Text, comment="排期备注")
+    publish_note = Column(Text, comment="发布备注")
+    create_time = Column(DateTime, default=datetime.now, comment="排期创建时间")
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="排期更新时间")
