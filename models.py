@@ -42,7 +42,7 @@ class Schedule(Base):
     content_id = Column(Integer, ForeignKey("contents.id"), nullable=False, comment="内容ID")
     platform = Column(String(20), nullable=False, comment="平台")
     publish_time = Column(DateTime, nullable=False, comment="发布时间")
-    status = Column(String(20), default="pending", comment="发布状态：pending（待发布）、published（已发布）、failed（发布失败）")
+    status = Column(String(20), default="pending", comment="发布状态：pending（待发布）、published（已发布）、failed（发布失败）、expired（已过期）")
     schedule_note = Column(Text, comment="排期备注")
     publish_note = Column(Text, comment="发布备注")
     create_time = Column(DateTime, default=datetime.now, comment="排期创建时间")

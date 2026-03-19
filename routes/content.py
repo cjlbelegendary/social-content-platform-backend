@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from models import Content, Session as SessionModel
@@ -6,6 +6,7 @@ from routes.user import get_db
 from utils.auth import get_current_user
 from utils.ai_helper import generate_social_content, generate_social_content_stream  # 导入异步函数和流式函数
 import logging
+from typing import List
 import datetime
 
 # 初始化路由
@@ -185,8 +186,8 @@ async def delete_content(  # 加async（可选）
 # 6. 获取所有生成内容（支持筛选和分页）
 @router.get("/contents")
 async def get_all_contents(
-    platform: str = None,  # 平台筛选
-    session_id: int = None,  # 会话ID筛选
+    platform: List[str] = Query(None),  # 平台筛选（支持多选）
+    session_id: List[int] = Query(None),  # 会话ID筛选（支持多选）
     start_time: str = None,  # 开始时间（格式：2024-01-01）
     end_time: str = None,  # 结束时间（格式：2024-01-31）
     title: str = None,  # 标题关键词筛选
@@ -206,10 +207,10 @@ async def get_all_contents(
         
         # 应用筛选条件
         if platform:
-            query = query.filter(Content.platform == platform)
+            query = query.filter(Content.platform.in_(platform))
         
         if session_id:
-            query = query.filter(Content.session_id == session_id)
+            query = query.filter(Content.session_id.in_(session_id))
         
         if start_time:
             # 筛选开始时间之后的内容

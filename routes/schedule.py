@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session
 from models import Schedule, Content
 from routes.user import get_db
 from utils.auth import get_current_user
 import logging
 import datetime
+from typing import List
 
 # 初始化路由
 router = APIRouter(prefix="/schedule", tags=["排期接口"])
@@ -35,19 +36,26 @@ async def create_schedule(
         except ValueError:
             raise HTTPException(status_code=400, detail="发布时间格式错误，正确格式：2024-03-19 12:00:00")
         
-        # 创建排期记录
+        # 检查是否已过期
+        status = "pending"
+        if publish_datetime < datetime.datetime.now():
+            status = "expired"
+        
+        # 创建排期
         new_schedule = Schedule(
             user_id=user_id,
             content_id=content_id,
             platform=platform,
             publish_time=publish_datetime,
-            status="pending",  # 初始状态为待发布
+            status=status,
             schedule_note=schedule_note
         )
-        
         db.add(new_schedule)
         db.commit()
         db.refresh(new_schedule)
+        
+        # 检查是否已过期
+        is_expired = new_schedule.status == "expired"
         
         return {
             "code": 200,
@@ -58,6 +66,7 @@ async def create_schedule(
                 "platform": new_schedule.platform,
                 "publish_time": new_schedule.publish_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "status": new_schedule.status,
+                "is_expired": is_expired,  # 新增：是否已过期
                 "schedule_note": new_schedule.schedule_note,
                 "create_time": new_schedule.create_time.strftime("%Y-%m-%d %H:%M:%S")
             }
@@ -128,13 +137,18 @@ async def batch_create_schedules(
                     })
                     continue
                 
+                # 检查是否已过期
+                status = "pending"
+                if publish_datetime < datetime.datetime.now():
+                    status = "expired"
+                
                 # 创建排期记录
                 new_schedule = Schedule(
                     user_id=user_id,
                     content_id=content_id,
                     platform=platform,
                     publish_time=publish_datetime,
-                    status="pending",  # 初始状态为待发布
+                    status=status,  # 设置状态（待发布或已过期）
                     schedule_note=schedule_note
                 )
                 
@@ -158,6 +172,9 @@ async def batch_create_schedules(
             content = db.query(Content).filter(Content.id == schedule.content_id).first()
             content_title = content.title if content else ""
             
+            # 检查是否已过期
+            is_expired = schedule.status == "expired"
+            
             result_schedules.append({
                 "id": schedule.id,
                 "content_id": schedule.content_id,
@@ -165,6 +182,7 @@ async def batch_create_schedules(
                 "platform": schedule.platform,
                 "publish_time": schedule.publish_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "status": schedule.status,
+                "is_expired": is_expired,  # 新增：是否已过期
                 "schedule_note": schedule.schedule_note,
                 "create_time": schedule.create_time.strftime("%Y-%m-%d %H:%M:%S")
             })
@@ -243,11 +261,11 @@ async def batch_update_schedules(
                 # 更新状态
                 status = item.get("status")
                 if status:
-                    valid_statuses = ["pending", "published", "failed"]
+                    valid_statuses = ["pending", "published", "failed", "expired"]
                     if status not in valid_statuses:
                         errors.append({
                             "index": idx,
-                            "error": "状态值不合法，支持的状态：pending/published/failed"
+                            "error": "状态值不合法，支持的状态：pending/published/failed/expired"
                         })
                         continue
                     schedule.status = status
@@ -294,6 +312,9 @@ async def batch_update_schedules(
             content = db.query(Content).filter(Content.id == schedule.content_id).first()
             content_title = content.title if content else ""
             
+            # 检查是否已过期
+            is_expired = schedule.status == "expired"
+            
             result_schedules.append({
                 "id": schedule.id,
                 "content_id": schedule.content_id,
@@ -301,6 +322,7 @@ async def batch_update_schedules(
                 "platform": schedule.platform,
                 "publish_time": schedule.publish_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "status": schedule.status,
+                "is_expired": is_expired,  # 新增：是否已过期
                 "schedule_note": schedule.schedule_note,
                 "publish_note": schedule.publish_note,
                 "create_time": schedule.create_time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -340,8 +362,8 @@ async def batch_update_schedules(
 # 2. 查询排期列表接口
 @router.get("/list")
 async def get_schedule_list(
-    status: str = None,  # 状态筛选
-    platform: str = None,  # 平台筛选
+    status: List[str] = Query(None),  # 状态筛选（支持多选）
+    platform: List[str] = Query(None),  # 平台筛选（支持多选）
     start_time: str = None,  # 开始时间（格式：2024-03-01）
     end_time: str = None,  # 结束时间（格式：2024-03-31）
     content_title: str = None,  # 内容标题筛选
@@ -362,10 +384,10 @@ async def get_schedule_list(
         
         # 应用筛选条件
         if status:
-            query = query.filter(Schedule.status == status)
+            query = query.filter(Schedule.status.in_(status))
         
         if platform:
-            query = query.filter(Schedule.platform == platform)
+            query = query.filter(Schedule.platform.in_(platform))
         
         if start_time:
             # 筛选开始时间之后的排期
@@ -407,9 +429,18 @@ async def get_schedule_list(
         # 构建响应数据
         schedule_list = []
         for schedule in schedules:
+            # 检查并更新过期状态
+            if schedule.status == "pending" and schedule.publish_time < datetime.datetime.now():
+                schedule.status = "expired"
+                db.commit()
+                db.refresh(schedule)
+            
             # 获取内容信息
             content = db.query(Content).filter(Content.id == schedule.content_id).first()
             content_title = content.title if content else ""
+            
+            # 检查是否已过期
+            is_expired = schedule.status == "expired"
             
             schedule_list.append({
                 "id": schedule.id,
@@ -418,6 +449,7 @@ async def get_schedule_list(
                 "platform": schedule.platform,
                 "publish_time": schedule.publish_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "status": schedule.status,
+                "is_expired": is_expired,  # 新增：是否已过期
                 "schedule_note": schedule.schedule_note,
                 "publish_note": schedule.publish_note,
                 "create_time": schedule.create_time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -465,9 +497,9 @@ async def update_schedule(
         
         # 验证并更新状态
         if status:
-            valid_statuses = ["pending", "published", "failed"]
+            valid_statuses = ["pending", "published", "failed", "expired"]
             if status not in valid_statuses:
-                raise HTTPException(status_code=400, detail="状态值不合法，支持的状态：pending/published/failed")
+                raise HTTPException(status_code=400, detail="状态值不合法，支持的状态：pending/published/failed/expired")
             schedule.status = status
         
         # 更新平台
