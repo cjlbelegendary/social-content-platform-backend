@@ -55,7 +55,7 @@ async def generate_content(  # 仅加async关键字
                 })
         
         # 3. 调用异步AI生成函数（60秒超时）
-        ai_content = await generate_social_content(prompt, platform, timeout=60, session_history=session_history)
+        ai_content = await generate_social_content(prompt, platform, timeout=60, session_history=session_history, db=db, user_id=user_id)
         
         # 3. 保存到数据库
         new_content = Content(
@@ -328,7 +328,7 @@ async def generate_content_stream(
             print("开始生成内容...")
             # 调用流式生成函数
             print("调用generate_social_content_stream函数...")
-            for chunk in generate_social_content_stream(prompt, platform, session_history=session_history):
+            for chunk in generate_social_content_stream(prompt, platform, session_history=session_history, db=db, user_id=user_id):
                 print(f"生成内容块：{chunk}")
                 # 收集内容块
                 full_content.append(chunk)

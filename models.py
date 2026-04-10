@@ -47,3 +47,15 @@ class Schedule(Base):
     publish_note = Column(Text, comment="发布备注")
     create_time = Column(DateTime, default=datetime.now, comment="排期创建时间")
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="排期更新时间")
+
+# 用户人设配置表模型
+class UserPersona(Base):
+    __tablename__ = "user_persona"
+    id = Column(Integer, primary_key=True, index=True, comment="主键")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="用户ID，关联现有用户")
+    domain = Column(String(50), nullable=False, comment="领域")
+    style = Column(String(50), nullable=False, comment="风格")
+    tone = Column(String(50), nullable=False, comment="语气")
+    is_default = Column(Integer, default=0, comment="是否默认 0/1")
+    create_time = Column(DateTime, default=datetime.now, comment="创建时间")
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")

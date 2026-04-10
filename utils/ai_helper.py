@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from sqlalchemy.orm import Session
+from models import UserPersona
 
 # 加载环境变量
 load_dotenv()
@@ -19,6 +21,31 @@ VOLC_MODEL_ID = os.getenv("VOLC_MODEL_ID", "glm-4-7-251222")
 
 # 创建线程池（用于异步执行同步AI调用）
 executor = ThreadPoolExecutor(max_workers=5)
+
+# 生成人设提示词
+def generate_persona_prompt(db: Session, user_id: int) -> str:
+    """
+    根据用户的人设配置生成人设提示词
+    :param db: 数据库会话
+    :param user_id: 用户ID
+    :return: 人设提示词
+    """
+    try:
+        # 查询用户的人设配置
+        persona = db.query(UserPersona).filter(UserPersona.user_id == user_id).first()
+        
+        if persona:
+            # 根据人设配置生成提示词
+            persona_prompt = f"你的领域是{persona.domain}，风格是{persona.style}，语气是{persona.tone}。"
+        else:
+            # 默认提示词
+            persona_prompt = "你的领域是通用，风格是标准，语气是中性。"
+        
+        return persona_prompt
+    except Exception as e:
+        logging.error(f"生成人设提示词异常：{str(e)}")
+        # 出错时返回默认提示词
+        return "你的领域是通用，风格是标准，语气是中性。"
 
 # 配置请求重试（解决网络超时）
 def create_retry_session():
@@ -110,12 +137,14 @@ def process_stream_content(text, platform):
                 time.sleep(0.05)
 
 # 保留你原有核心逻辑，仅优化日志
-def generate_social_content_sync(prompt: str, platform: str = "小红书", session_history: list = None) -> str:
+def generate_social_content_sync(prompt: str, platform: str = "小红书", session_history: list = None, db: Session = None, user_id: int = None) -> str:
     """
     调用火山方舟GLM-4（带重试+长超时，解决网络问题）
     :param prompt: 创作需求
     :param platform: 目标平台
     :param session_history: 会话历史，格式为[{"role": "user/assistant", "content": "内容"}]
+    :param db: 数据库会话
+    :param user_id: 用户ID
     """
     # 1. 基础校验
     if not prompt or prompt.strip() in ["string", "请输入创作需求"]:
@@ -131,7 +160,12 @@ def generate_social_content_sync(prompt: str, platform: str = "小红书", sessi
             elif item.get("role") == "assistant":
                 history_text += f"助手：{item.get('content')}\n"
 
-    user_prompt = f"""你是专业的社交内容生成专家，严格按以下要求生成内容：
+    # 生成人设提示词
+    persona_prompt = ""
+    if 'db' in locals() and 'user_id' in locals() and db and user_id:
+        persona_prompt = generate_persona_prompt(db, user_id)
+    
+    user_prompt = f"""{persona_prompt}你是专业的社交内容生成专家，严格按以下要求生成内容：
 1. 适配平台：{platform}
 2. 创作需求：{prompt}
 3. 格式要求：
@@ -215,20 +249,22 @@ def generate_social_content_sync(prompt: str, platform: str = "小红书", sessi
         return f"{prompt}✨ 生成成功✨\n{prompt}也太治愈了吧😜\n忙完一周终于能放松一下，{prompt}的幸福感直接拉满～\n\n#{prompt} #今日份快乐 #打工人的日常"
 
 # 新增：异步包装函数（核心解决超时问题，不改动原有逻辑）
-async def generate_social_content(prompt: str, platform: str = "小红书", timeout: int = 60, session_history: list = None):
+async def generate_social_content(prompt: str, platform: str = "小红书", timeout: int = 60, session_history: list = None, db: Session = None, user_id: int = None):
     """
     异步调用AI生成内容（带整体超时控制）
     :param prompt: 创作需求
     :param platform: 目标平台
     :param timeout: 整体超时时间（秒）
     :param session_history: 会话历史，格式为[{"role": "user/assistant", "content": "内容"}]
+    :param db: 数据库会话
+    :param user_id: 用户ID
     :return: 生成的内容
     """
     try:
         # 用线程池执行同步函数，设置整体超时
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
-            loop.run_in_executor(executor, generate_social_content_sync, prompt, platform, session_history),
+            loop.run_in_executor(executor, generate_social_content_sync, prompt, platform, session_history, db, user_id),
             timeout=timeout
         )
         return result
@@ -241,12 +277,14 @@ async def generate_social_content(prompt: str, platform: str = "小红书", time
         return f"{prompt}✨ 生成成功✨\n{prompt}的快乐谁懂啊～\n小小插曲不影响好心情😝\n\n#{prompt} #生活小美好 #随拍"
 
 # 新增：流式生成函数
-def generate_social_content_stream(prompt: str, platform: str = "小红书", session_history: list = None):
+def generate_social_content_stream(prompt: str, platform: str = "小红书", session_history: list = None, db: Session = None, user_id: int = None):
     """
     流式调用火山方舟GLM-4
     :param prompt: 创作需求
     :param platform: 目标平台
     :param session_history: 会话历史，格式为[{"role": "user/assistant", "content": "内容"}]
+    :param db: 数据库会话
+    :param user_id: 用户ID
     :return: 生成器，逐块返回内容
     """
     # 1. 基础校验
@@ -264,7 +302,12 @@ def generate_social_content_stream(prompt: str, platform: str = "小红书", ses
             elif item.get("role") == "assistant":
                 history_text += f"助手：{item.get('content')}\n"
 
-    user_prompt = f"""你是专业的社交内容生成专家，严格按以下要求生成内容：
+    # 生成人设提示词
+    persona_prompt = ""
+    if 'db' in locals() and 'user_id' in locals() and db and user_id:
+        persona_prompt = generate_persona_prompt(db, user_id)
+    
+    user_prompt = f"""{persona_prompt}你是专业的社交内容生成专家，严格按以下要求生成内容：
 1. 适配平台：{platform}
 2. 创作需求：{prompt}
 3. 格式要求：
