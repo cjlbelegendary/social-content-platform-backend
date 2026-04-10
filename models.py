@@ -59,3 +59,15 @@ class UserPersona(Base):
     is_default = Column(Integer, default=0, comment="是否默认 0/1")
     create_time = Column(DateTime, default=datetime.now, comment="创建时间")
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+# 热点表模型
+class Hotspot(Base):
+    __tablename__ = "hotspots"
+    id = Column(Integer, primary_key=True, index=True, comment="主键")
+    platform = Column(String(50), nullable=False, comment="平台：微博、抖音、小红书等")
+    title = Column(String(255), nullable=False, comment="热点标题")
+    keywords = Column(String(255), comment="关键词")
+    url = Column(String(500), comment="原始链接")
+    heat_value = Column(Integer, comment="热度值")
+    create_time = Column(DateTime, default=datetime.now, comment="创建时间")
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
