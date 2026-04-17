@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from models import Content, Session as SessionModel
 from routes.user import get_db
 from utils.auth import get_current_user
-from utils.ai_helper import generate_social_content, generate_social_content_stream  # 导入异步函数和流式函数
+from utils.ai_helper import generate_social_content_stream  # 导入异步函数和流式函数
 import logging
 from typing import List
 import datetime
