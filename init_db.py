@@ -1,27 +1,32 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models import Base, User, Session, Content, Schedule, UserPersona, Hotspot, Image
+from models import Base, User, Session, Content, Schedule, UserPersona, Hotspot, Image, ContentPackage, PackageItem
 import os
 from dotenv import load_dotenv
 
-# 加载环境变量
 load_dotenv()
 
-# 获取数据库连接字符串
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = os.getenv("DB_PORT", "3306")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_NAME = os.getenv("DB_NAME", "social_content_db")
 
-# 创建数据库引擎
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 
-# 创建所有表
+print(f"正在连接数据库：{DB_HOST}:{DB_PORT}/{DB_NAME}")
+
+engine = create_engine(DATABASE_URL, echo=True)
+
 Base.metadata.create_all(bind=engine)
 
-print("数据库表创建完成！")
+print("\n数据库表创建完成！")
 print("创建的表：")
 print("- users (用户表)")
 print("- sessions (会话表)")
 print("- contents (内容表)")
+print("- images (图片表)")
+print("- content_packages (内容包表)")
+print("- package_items (内容包关联表)")
 print("- schedules (排期表)")
 print("- user_persona (用户人设配置表)")
 print("- hotspots (热点表)")
-print("- images (图片表)")

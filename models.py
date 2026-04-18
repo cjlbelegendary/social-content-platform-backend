@@ -39,7 +39,7 @@ class Schedule(Base):
     __tablename__ = "schedules"
     id = Column(Integer, primary_key=True, index=True, comment="排期唯一标识")
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="关联用户ID，排期所属用户")
-    content_id = Column(Integer, ForeignKey("contents.id"), nullable=False, comment="内容ID")
+    package_id = Column(Integer, ForeignKey("content_packages.id"), nullable=True, comment="内容包ID")
     platform = Column(String(20), nullable=False, comment="平台")
     publish_time = Column(DateTime, nullable=False, comment="发布时间")
     status = Column(String(20), default="pending", comment="发布状态：pending（待发布）、published（已发布）、failed（发布失败）、expired（已过期）")
@@ -86,4 +86,26 @@ class Image(Base):
     style = Column(String(50), comment="风格：清新自然/复古胶片/简约极简/文艺柔和/潮流时尚/商务专业")
     size = Column(String(20), comment="尺寸：1:1/3:4/4:3/16:9/9:16")
     platform = Column(String(20), comment="平台：小红书/微博/朋友圈/抖音")
+    create_time = Column(DateTime, default=datetime.now, comment="创建时间")
+
+# 内容包表模型
+class ContentPackage(Base):
+    __tablename__ = "content_packages"
+    id = Column(Integer, primary_key=True, index=True, comment="主键")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="用户ID")
+    title = Column(String(100), nullable=False, comment="内容包标题")
+    platform = Column(String(20), comment="平台：小红书/微博/朋友圈/抖音")
+    status = Column(String(20), default="completed", comment="状态：draft/completed/scheduled/published")
+    tags = Column(Text, comment="标签（JSON格式）")
+    create_time = Column(DateTime, default=datetime.now, comment="创建时间")
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+# 内容包关联表模型
+class PackageItem(Base):
+    __tablename__ = "package_items"
+    id = Column(Integer, primary_key=True, index=True, comment="主键")
+    package_id = Column(Integer, ForeignKey("content_packages.id"), nullable=False, comment="内容包ID")
+    item_type = Column(String(20), nullable=False, comment="类型：content/image")
+    item_id = Column(Integer, nullable=False, comment="关联ID（contents.id或images.id）")
+    item_order = Column(Integer, default=0, comment="排序")
     create_time = Column(DateTime, default=datetime.now, comment="创建时间")

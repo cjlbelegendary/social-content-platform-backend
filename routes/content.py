@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from models import Content, Session as SessionModel, Image
+from models import Content, Session as SessionModel, Image, ContentPackage, PackageItem
 from routes.user import get_db
 from utils.auth import get_current_user
-from utils.ai_helper import generate_social_content_stream  # 导入异步函数和流式函数
+from utils.ai_helper import generate_social_content_stream
 import logging
 from typing import List
 import datetime
@@ -138,93 +138,135 @@ async def delete_content(  # 加async（可选）
 # 6. 获取所有生成内容（支持筛选和分页）
 @router.get("/contents")
 async def get_all_contents(
-    platform: List[str] = Query(None),  # 平台筛选（支持多选）
-    session_id: List[int] = Query(None),  # 会话ID筛选（支持多选）
-    start_time: str = None,  # 开始时间（格式：2024-01-01）
-    end_time: str = None,  # 结束时间（格式：2024-01-31）
-    title: str = None,  # 标题关键词筛选
-    content: str = None,  # 内容关键词筛选
-    page: int = 1,  # 页码，默认1
-    page_size: int = 10,  # 每页数量，默认10
+    type: str = Query(default="all"),
+    platform: List[str] = Query(None),
+    start_time: str = None,
+    end_time: str = None,
+    keyword: str = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
-    """
-    获取所有生成内容（支持筛选和分页）
-    用于内容管理页面
-    """
+    """获取所有内容（文案+图片）"""
     try:
-        # 构建查询
-        query = db.query(Content).filter(Content.user_id == user_id)
+        all_items = []
         
-        # 应用筛选条件
-        if platform:
-            query = query.filter(Content.platform.in_(platform))
+        # 查询文案
+        if type in ["all", "content"]:
+            content_query = db.query(Content).filter(Content.user_id == user_id)
+            
+            if platform:
+                content_query = content_query.filter(Content.platform.in_(platform))
+            
+            if start_time:
+                start_date = datetime.datetime.strptime(start_time, "%Y-%m-%d")
+                content_query = content_query.filter(Content.create_time >= start_date)
+            
+            if end_time:
+                end_date = datetime.datetime.strptime(end_time, "%Y-%m-%d")
+                end_date = end_date + datetime.timedelta(days=1)
+                content_query = content_query.filter(Content.create_time < end_date)
+            
+            if keyword:
+                content_query = content_query.filter(
+                    (Content.title.contains(keyword)) | (Content.content.contains(keyword))
+                )
+            
+            contents = content_query.all()
+            
+            for content in contents:
+                # 查询是否在内容包中
+                package_items = db.query(PackageItem).filter(
+                    PackageItem.item_type == "content",
+                    PackageItem.item_id == content.id
+                ).all()
+                
+                package_ids = [item.package_id for item in package_items]
+                
+                all_items.append({
+                    "type": "content",
+                    "id": content.id,
+                    "title": content.title,
+                    "content": content.content,
+                    "platform": content.platform,
+                    "create_time": content.create_time,
+                    "create_time_str": content.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "is_in_package": len(package_ids) > 0,
+                    "package_ids": package_ids
+                })
         
-        if session_id:
-            query = query.filter(Content.session_id.in_(session_id))
+        # 查询图片
+        if type in ["all", "image"]:
+            image_query = db.query(Image).filter(Image.user_id == user_id)
+            
+            if platform:
+                image_query = image_query.filter(Image.platform.in_(platform))
+            
+            if start_time:
+                start_date = datetime.datetime.strptime(start_time, "%Y-%m-%d")
+                image_query = image_query.filter(Image.create_time >= start_date)
+            
+            if end_time:
+                end_date = datetime.datetime.strptime(end_time, "%Y-%m-%d")
+                end_date = end_date + datetime.timedelta(days=1)
+                image_query = image_query.filter(Image.create_time < end_date)
+            
+            if keyword:
+                image_query = image_query.filter(Image.prompt.contains(keyword))
+            
+            images = image_query.all()
+            
+            for image in images:
+                # 查询是否在内容包中
+                package_items = db.query(PackageItem).filter(
+                    PackageItem.item_type == "image",
+                    PackageItem.item_id == image.id
+                ).all()
+                
+                package_ids = [item.package_id for item in package_items]
+                
+                all_items.append({
+                    "type": "image",
+                    "id": image.id,
+                    "url": image.url,
+                    "width": image.width,
+                    "height": image.height,
+                    "prompt": image.prompt,
+                    "style": image.style,
+                    "platform": image.platform,
+                    "create_time": image.create_time,
+                    "create_time_str": image.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "is_in_package": len(package_ids) > 0,
+                    "package_ids": package_ids
+                })
         
-        if start_time:
-            # 筛选开始时间之后的内容
-            start_date = datetime.datetime.strptime(start_time, "%Y-%m-%d")
-            query = query.filter(Content.create_time >= start_date)
-        
-        if end_time:
-            # 筛选结束时间之前的内容
-            end_date = datetime.datetime.strptime(end_time, "%Y-%m-%d")
-            # 加上一天，使其包含结束日期的所有时间
-            end_date = end_date + datetime.timedelta(days=1)
-            query = query.filter(Content.create_time < end_date)
-        
-        if title:
-            # 筛选标题包含关键词的内容
-            query = query.filter(Content.title.contains(title))
-        
-        if content:
-            # 筛选内容包含关键词的内容
-            query = query.filter(Content.content.contains(content))
+        # 按创建时间倒序排序
+        all_items.sort(key=lambda x: x["create_time"], reverse=True)
         
         # 计算总数
-        total = query.count()
+        total = len(all_items)
         
-        # 计算分页
+        # 分页
         offset = (page - 1) * page_size
-        contents = query.order_by(Content.create_time.desc()).offset(offset).limit(page_size).all()
+        paginated_items = all_items[offset:offset + page_size]
         
-        # 构建响应数据
-        content_list = []
-        for content in contents:
-            # 获取会话信息
-            session = db.query(SessionModel).filter(SessionModel.id == content.session_id).first()
-            session_title = session.title if session else ""
-            
-            content_list.append({
-                "id": content.id,
-                "session_id": content.session_id,
-                "session_title": session_title,
-                "title": content.title,
-                "content": content.content,
-                "platform": content.platform,
-                "create_time": content.create_time.strftime("%Y-%m-%d %H:%M:%S")
-            })
+        # 移除create_time字段
+        for item in paginated_items:
+            del item["create_time"]
         
         return {
             "code": 200,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "content_list": content_list
+            "data": {
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "list": paginated_items
+            }
         }
     except Exception as e:
         logging.error(f"获取内容列表异常：{str(e)}")
-        return {
-            "code": 500,
-            "msg": "获取内容列表失败，请稍后重试",
-            "total": 0,
-            "page": 1,
-            "page_size": 10,
-            "content_list": []
-        }
+        raise HTTPException(status_code=500, detail="获取内容列表失败，请稍后重试")
 
 # 9. 流式生成内容接口
 @router.post("/generate/stream")
