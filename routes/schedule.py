@@ -77,6 +77,110 @@ async def create_schedule(
         logging.error(f"创建排期异常：{str(e)}")
         raise HTTPException(status_code=500, detail="创建排期失败，请稍后重试")
 
+# 1.1 批量创建排期接口
+@router.post("/batch-create")
+async def batch_create_schedules(
+    schedules: list = Body(...),
+    db = Depends(get_db),
+    user_id: int = Depends(get_current_user)
+):
+    """批量创建排期"""
+    try:
+        if not schedules:
+            raise HTTPException(status_code=400, detail="排期列表不能为空")
+        
+        created_schedules = []
+        errors = []
+        
+        for idx, item in enumerate(schedules):
+            try:
+                package_id = item.get("package_id")
+                platform = item.get("platform")
+                publish_time = item.get("publish_time")
+                schedule_note = item.get("schedule_note")
+                
+                if not package_id or not platform or not publish_time:
+                    errors.append({
+                        "index": idx,
+                        "error": "缺少必填字段：package_id、platform、publish_time"
+                    })
+                    continue
+                
+                package = db.query(ContentPackage).filter(
+                    ContentPackage.id == package_id,
+                    ContentPackage.user_id == user_id
+                ).first()
+                if not package:
+                    errors.append({
+                        "index": idx,
+                        "error": f"内容包ID {package_id} 不存在或无权限操作"
+                    })
+                    continue
+                
+                try:
+                    publish_datetime = datetime.datetime.strptime(publish_time, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    errors.append({
+                        "index": idx,
+                        "error": "发布时间格式错误，正确格式：2024-03-19 12:00:00"
+                    })
+                    continue
+                
+                status = "pending"
+                if publish_datetime < datetime.datetime.now():
+                    status = "expired"
+                
+                new_schedule = Schedule(
+                    user_id=user_id,
+                    package_id=package_id,
+                    platform=platform,
+                    publish_time=publish_datetime,
+                    status=status,
+                    schedule_note=schedule_note
+                )
+                db.add(new_schedule)
+                created_schedules.append(new_schedule)
+                
+                package.status = "scheduled"
+                
+            except Exception as e:
+                errors.append({
+                    "index": idx,
+                    "error": f"处理排期时出错：{str(e)}"
+                })
+        
+        db.commit()
+        
+        result_schedules = []
+        for schedule in created_schedules:
+            db.refresh(schedule)
+            result_schedules.append({
+                "schedule_id": schedule.id,
+                "package_id": schedule.package_id,
+                "platform": schedule.platform,
+                "publish_time": schedule.publish_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "status": schedule.status,
+                "schedule_note": schedule.schedule_note,
+                "create_time": schedule.create_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        return {
+            "code": 200,
+            "msg": f"批量创建排期成功，成功 {len(result_schedules)} 个，失败 {len(errors)} 个",
+            "data": {
+                "success_count": len(result_schedules),
+                "error_count": len(errors),
+                "schedules": result_schedules,
+                "errors": errors if errors else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"批量创建排期异常：{str(e)}")
+        raise HTTPException(status_code=500, detail="批量创建排期失败，请稍后重试")
+
 # 2. 查询排期列表接口
 @router.get("/list")
 async def get_schedule_list(
@@ -84,6 +188,7 @@ async def get_schedule_list(
     platform: List[str] = Query(None),
     start_time: str = None,
     end_time: str = None,
+    package_title: str = Query(None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db = Depends(get_db),
@@ -91,10 +196,8 @@ async def get_schedule_list(
 ):
     """查询排期列表"""
     try:
-        # 构建查询
         query = db.query(Schedule).filter(Schedule.user_id == user_id)
         
-        # 应用筛选条件
         if status:
             query = query.filter(Schedule.status.in_(status))
         
@@ -110,23 +213,25 @@ async def get_schedule_list(
             end_date = end_date + datetime.timedelta(days=1)
             query = query.filter(Schedule.publish_time < end_date)
         
-        # 计算总数
+        if package_title:
+            package_ids = db.query(ContentPackage.id).filter(
+                ContentPackage.title.contains(package_title)
+            ).all()
+            package_id_list = [pid[0] for pid in package_ids]
+            query = query.filter(Schedule.package_id.in_(package_id_list))
+        
         total = query.count()
         
-        # 计算分页
         offset = (page - 1) * page_size
         schedules = query.order_by(Schedule.publish_time.asc()).offset(offset).limit(page_size).all()
         
-        # 构建响应数据
         schedule_list = []
         for schedule in schedules:
-            # 检查并更新过期状态
             if schedule.status == "pending" and schedule.publish_time < datetime.datetime.now():
                 schedule.status = "expired"
                 db.commit()
                 db.refresh(schedule)
             
-            # 获取内容包信息
             package = db.query(ContentPackage).filter(ContentPackage.id == schedule.package_id).first()
             
             if package:
