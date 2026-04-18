@@ -385,19 +385,46 @@ def extract_keywords_from_content(content: str) -> str:
     :param content: 文案内容
     :return: 提取的关键词
     """
-    # 简单的关键词提取逻辑（可以根据需要优化）
-    # 移除话题标签
     import re
+    
+    # 移除话题标签
     content_clean = re.sub(r'#\S+', '', content)
     # 移除表情符号
     content_clean = re.sub(r'[\U00010000-\U0010ffff]', '', content_clean)
     # 移除多余空格
     content_clean = ' '.join(content_clean.split())
     
-    # 提取前100个字符作为关键词
-    keywords = content_clean[:100]
+    # 尝试使用jieba提取关键词
+    try:
+        import jieba
+        import jieba.analyse
+        
+        # 使用TF-IDF算法提取关键词
+        keywords = jieba.analyse.extract_tags(
+            content_clean,
+            topK=10,  # 提取前10个关键词
+            withWeight=False,
+            allowPOS=('n', 'nr', 'ns', 'nt', 'nz', 'v', 'vn', 'a', 'ad', 'an')  # 只提取名词、动词、形容词
+        )
+        
+        if keywords:
+            # 将关键词组合成描述
+            keyword_str = '，'.join(keywords)
+            logging.info(f"提取关键词成功：{keyword_str}")
+            return keyword_str
+        else:
+            # 如果jieba没有提取到关键词，降级到简单截取
+            logging.warning("jieba未提取到关键词，使用简单截取")
+            return content_clean[:100]
     
-    return keywords
+    except ImportError:
+        # 如果没有安装jieba，使用简单截取
+        logging.warning("未安装jieba库，使用简单截取方式提取关键词")
+        return content_clean[:100]
+    
+    except Exception as e:
+        logging.error(f"关键词提取异常：{str(e)}")
+        return content_clean[:100]
 
 def generate_image_from_content(content: str, style: str = None, size: str = "3:4") -> dict:
     """
