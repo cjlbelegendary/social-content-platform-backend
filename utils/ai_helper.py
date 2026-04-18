@@ -19,6 +19,10 @@ VOLC_BEARER_TOKEN = os.getenv("VOLC_BEARER_TOKEN", "baadb7e1-c277-4657-932e-7393
 VOLC_ENDPOINT = os.getenv("VOLC_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3/responses")
 VOLC_MODEL_ID = os.getenv("VOLC_MODEL_ID", "glm-4-7-251222")
 
+# 火山方舟图片生成配置
+VOLC_IMAGE_ENDPOINT = os.getenv("VOLC_IMAGE_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3/images/generations")
+VOLC_IMAGE_MODEL = os.getenv("VOLC_IMAGE_MODEL", "doubao-seedream-4-0-250828")
+
 # 创建线程池（用于异步执行同步AI调用）
 executor = ThreadPoolExecutor(max_workers=5)
 
@@ -246,3 +250,165 @@ if __name__ == "__main__":
         print(content)
     
     asyncio.run(test())
+
+# 图片生成相关函数
+def generate_image(prompt: str, style: str = None, size: str = "1:1") -> dict:
+    """
+    调用火山方舟图片生成API
+    :param prompt: 图片描述/提示词
+    :param style: 风格（可选）
+    :param size: 尺寸（可选）：1:1/3:4/4:3/16:9/9:16
+    :return: 包含图片URL和信息的字典
+    """
+    # 构建完整的提示词
+    full_prompt = prompt
+    if style:
+        style_prompts = {
+            "清新自然": "清新自然的风格，明亮柔和的光线，自然色彩",
+            "复古胶片": "复古胶片风格，怀旧色调，颗粒感",
+            "简约极简": "简约极简风格，干净简洁，留白设计",
+            "文艺柔和": "文艺柔和风格，温暖色调，柔和光线",
+            "潮流时尚": "潮流时尚风格，大胆配色，现代感",
+            "商务专业": "商务专业风格，正式场景，专业光线"
+        }
+        if style in style_prompts:
+            full_prompt = f"{prompt}，{style_prompts[style]}"
+    
+    # 映射尺寸到API支持的格式（根据API文档，size应该是"2K"等）
+    size_mapping = {
+        "1:1": "1024x1024",
+        "3:4": "768x1024",
+        "4:3": "1024x768",
+        "16:9": "1920x1080",
+        "9:16": "1080x1920"
+    }
+    api_size = size_mapping.get(size, "1024x1024")
+    
+    # 构造请求体（根据API文档）
+    request_body = {
+        "model": VOLC_IMAGE_MODEL,
+        "prompt": full_prompt,
+        "response_format": "url",
+        "size": api_size,
+        "seed": 12,
+        "guidance_scale": 2.5,
+        "watermark": True
+    }
+    
+    # 请求头
+    headers = {
+        "Authorization": f"Bearer {VOLC_BEARER_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        logging.info(f"调用图片生成API：{prompt[:50]}...")
+        logging.info(f"请求体：{json.dumps(request_body, ensure_ascii=False)}")
+        
+        # 创建带重试的session
+        session = create_retry_session()
+        response = session.post(
+            url=VOLC_IMAGE_ENDPOINT,
+            headers=headers,
+            json=request_body,
+            timeout=60,
+            verify=False
+        )
+        
+        logging.info(f"响应状态码：{response.status_code}")
+        logging.info(f"响应内容：{response.text[:500]}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # 提取图片信息
+            if "data" in result and len(result["data"]) > 0:
+                image_data = result["data"][0]
+                image_url = image_data.get("url", "")
+                
+                # 从size参数解析宽高
+                width, height = 1024, 1024
+                if api_size:
+                    try:
+                        size_parts = api_size.split("x")
+                        if len(size_parts) == 2:
+                            width = int(size_parts[0])
+                            height = int(size_parts[1])
+                    except:
+                        pass
+                
+                logging.info(f"图片生成成功：{image_url}")
+                
+                return {
+                    "success": True,
+                    "url": image_url,
+                    "width": width,
+                    "height": height,
+                    "prompt": prompt,
+                    "style": style,
+                    "size": size
+                }
+            else:
+                error_msg = f"API返回数据格式错误：{result}"
+                logging.error(f"图片生成失败：{error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg
+                }
+        else:
+            error_msg = f"API调用失败：{response.status_code}，响应：{response.text[:200]}"
+            logging.error(f"图片生成失败：{error_msg}")
+            return {
+                "success": False,
+                "error": error_msg
+            }
+    
+    except requests.exceptions.Timeout:
+        error_msg = "API调用超时"
+        logging.error(f"图片生成失败：{error_msg}")
+        return {
+            "success": False,
+            "error": error_msg
+        }
+    
+    except Exception as e:
+        error_msg = f"生成异常：{str(e)}"
+        logging.error(f"图片生成失败：{error_msg}")
+        return {
+            "success": False,
+            "error": error_msg
+        }
+
+def extract_keywords_from_content(content: str) -> str:
+    """
+    从文案内容中提取关键词，用于生成图片
+    :param content: 文案内容
+    :return: 提取的关键词
+    """
+    # 简单的关键词提取逻辑（可以根据需要优化）
+    # 移除话题标签
+    import re
+    content_clean = re.sub(r'#\S+', '', content)
+    # 移除表情符号
+    content_clean = re.sub(r'[\U00010000-\U0010ffff]', '', content_clean)
+    # 移除多余空格
+    content_clean = ' '.join(content_clean.split())
+    
+    # 提取前100个字符作为关键词
+    keywords = content_clean[:100]
+    
+    return keywords
+
+def generate_image_from_content(content: str, style: str = None, size: str = "3:4") -> dict:
+    """
+    从文案内容生成图片
+    :param content: 文案内容
+    :param style: 风格（可选）
+    :param size: 尺寸（可选）
+    :return: 包含图片URL和信息的字典
+    """
+    # 提取关键词
+    keywords = extract_keywords_from_content(content)
+    
+    # 生成图片
+    return generate_image(keywords, style, size)

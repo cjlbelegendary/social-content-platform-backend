@@ -71,3 +71,19 @@ class Hotspot(Base):
     heat_value = Column(Integer, comment="热度值")
     create_time = Column(DateTime, default=datetime.now, comment="创建时间")
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+
+# 图片生成记录表模型
+class Image(Base):
+    __tablename__ = "images"
+    id = Column(Integer, primary_key=True, index=True, comment="主键")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="用户ID")
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, comment="会话ID（可选）")
+    image_id = Column(String(100), unique=True, nullable=False, comment="图片唯一标识")
+    url = Column(String(500), nullable=False, comment="图片URL")
+    width = Column(Integer, comment="图片宽度")
+    height = Column(Integer, comment="图片高度")
+    prompt = Column(Text, nullable=False, comment="生成提示词")
+    style = Column(String(50), comment="风格：清新自然/复古胶片/简约极简/文艺柔和/潮流时尚/商务专业")
+    size = Column(String(20), comment="尺寸：1:1/3:4/4:3/16:9/9:16")
+    platform = Column(String(20), comment="平台：小红书/微博/朋友圈/抖音")
+    create_time = Column(DateTime, default=datetime.now, comment="创建时间")

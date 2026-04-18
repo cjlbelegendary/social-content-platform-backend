@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from models import Content, Session as SessionModel
+from models import Content, Session as SessionModel, Image
 from routes.user import get_db
 from utils.auth import get_current_user
 from utils.ai_helper import generate_social_content_stream  # 导入异步函数和流式函数
@@ -54,18 +54,50 @@ async def get_session_detail(
         if not session:
             raise HTTPException(status_code=400, detail="会话不存在或无权限访问")
         
-        # 查询会话下的所有内容
-        contents = db.query(Content).filter(Content.session_id == session_id).order_by(Content.create_time.desc()).all()
+        # 查询会话下的所有文案内容
+        contents = db.query(Content).filter(Content.session_id == session_id).all()
         
-        content_list = []
+        # 查询会话下的所有图片
+        images = db.query(Image).filter(Image.session_id == session_id).all()
+        
+        # 合并文案和图片，并按时间排序
+        all_items = []
+        
+        # 添加文案
         for c in contents:
-            content_list.append({
+            all_items.append({
+                "type": "content",
                 "id": c.id,
                 "title": c.title,
                 "content": c.content,
                 "platform": c.platform,
-                "create_time": c.create_time.strftime("%Y-%m-%d %H:%M:%S")
+                "create_time": c.create_time,
+                "create_time_str": c.create_time.strftime("%Y-%m-%d %H:%M:%S")
             })
+        
+        # 添加图片
+        for img in images:
+            all_items.append({
+                "type": "image",
+                "id": img.id,
+                "image_id": img.image_id,
+                "url": img.url,
+                "width": img.width,
+                "height": img.height,
+                "prompt": img.prompt,
+                "style": img.style,
+                "size": img.size,
+                "platform": img.platform,
+                "create_time": img.create_time,
+                "create_time_str": img.create_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        # 按创建时间排序（升序，最早的在前）
+        all_items.sort(key=lambda x: x["create_time"])
+        
+        # 移除create_time字段（只保留字符串格式）
+        for item in all_items:
+            del item["create_time"]
         
         return {
             "code": 200,
@@ -74,7 +106,7 @@ async def get_session_detail(
                 "session_title": session.title,
                 "create_time": session.create_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "update_time": session.update_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "contents": content_list
+                "contents": all_items
             }
         }
     except HTTPException:
