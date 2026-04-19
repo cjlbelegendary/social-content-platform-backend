@@ -19,21 +19,19 @@ async def generate_image_api(
     size: str = Body(default="1:1"),
     platform: str = Body(default=None),
     session_id: int = Body(default=None),
+    title: str = Body(default=None),
     db = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
     """生成图片"""
     try:
-        # 调用图片生成函数
         result = generate_image(prompt, style, size)
         
         if not result.get("success"):
             raise HTTPException(status_code=500, detail=result.get("error", "图片生成失败"))
         
-        # 生成图片ID
         image_id = f"img_{uuid.uuid4().hex[:16]}"
         
-        # 验证会话是否存在（如果提供了session_id）
         if session_id:
             session = db.query(SessionModel).filter(
                 SessionModel.id == session_id,
@@ -41,8 +39,16 @@ async def generate_image_api(
             ).first()
             if not session:
                 raise HTTPException(status_code=400, detail="会话不存在或无权限访问")
+        else:
+            session = SessionModel(
+                user_id=user_id,
+                title=title or prompt[:30]
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            session_id = session.id
         
-        # 保存到数据库
         new_image = Image(
             user_id=user_id,
             session_id=session_id,
@@ -72,7 +78,8 @@ async def generate_image_api(
                 "height": result["height"],
                 "prompt": prompt,
                 "style": style,
-                "size": size
+                "size": size,
+                "session_id": session_id
             }
         }
     
@@ -151,21 +158,19 @@ async def generate_image_from_content_api(
     style: str = Body(default=None),
     size: str = Body(default="3:4"),
     session_id: int = Body(default=None),
+    title: str = Body(default=None),
     db = Depends(get_db),
     user_id: int = Depends(get_current_user)
 ):
     """从文案生成配图"""
     try:
-        # 调用文案生成图片函数
         result = generate_image_from_content(content, style, size)
         
         if not result.get("success"):
             raise HTTPException(status_code=500, detail=result.get("error", "图片生成失败"))
         
-        # 生成图片ID
         image_id = f"img_{uuid.uuid4().hex[:16]}"
         
-        # 验证会话是否存在（如果提供了session_id）
         if session_id:
             session = db.query(SessionModel).filter(
                 SessionModel.id == session_id,
@@ -173,8 +178,16 @@ async def generate_image_from_content_api(
             ).first()
             if not session:
                 raise HTTPException(status_code=400, detail="会话不存在或无权限访问")
+        else:
+            session = SessionModel(
+                user_id=user_id,
+                title=title or content[:30]
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            session_id = session.id
         
-        # 保存到数据库
         new_image = Image(
             user_id=user_id,
             session_id=session_id,
@@ -204,7 +217,8 @@ async def generate_image_from_content_api(
                 "height": result["height"],
                 "prompt": content[:100],
                 "style": style,
-                "size": size
+                "size": size,
+                "session_id": session_id
             }
         }
     
