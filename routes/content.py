@@ -176,13 +176,21 @@ async def get_all_contents(
             contents = content_query.all()
             
             for content in contents:
-                # 查询是否在内容包中
                 package_items = db.query(PackageItem).filter(
                     PackageItem.item_type == "content",
                     PackageItem.item_id == content.id
                 ).all()
                 
                 package_ids = [item.package_id for item in package_items]
+                
+                session_info = None
+                if content.session_id:
+                    session = db.query(SessionModel).filter(SessionModel.id == content.session_id).first()
+                    if session:
+                        session_info = {
+                            "session_id": session.id,
+                            "session_title": session.title
+                        }
                 
                 all_items.append({
                     "type": "content",
@@ -193,7 +201,8 @@ async def get_all_contents(
                     "create_time": content.create_time,
                     "create_time_str": content.create_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "is_in_package": len(package_ids) > 0,
-                    "package_ids": package_ids
+                    "package_ids": package_ids,
+                    "session": session_info
                 })
         
         # 查询图片
@@ -218,13 +227,21 @@ async def get_all_contents(
             images = image_query.all()
             
             for image in images:
-                # 查询是否在内容包中
                 package_items = db.query(PackageItem).filter(
                     PackageItem.item_type == "image",
                     PackageItem.item_id == image.id
                 ).all()
                 
                 package_ids = [item.package_id for item in package_items]
+                
+                session_info = None
+                if image.session_id:
+                    session = db.query(SessionModel).filter(SessionModel.id == image.session_id).first()
+                    if session:
+                        session_info = {
+                            "session_id": session.id,
+                            "session_title": session.title
+                        }
                 
                 all_items.append({
                     "type": "image",
@@ -238,7 +255,8 @@ async def get_all_contents(
                     "create_time": image.create_time,
                     "create_time_str": image.create_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "is_in_package": len(package_ids) > 0,
-                    "package_ids": package_ids
+                    "package_ids": package_ids,
+                    "session": session_info
                 })
         
         # 按创建时间倒序排序
