@@ -72,6 +72,7 @@ async def generate_image_api(
             "code": 200,
             "msg": "success",
             "data": {
+                "id": new_image.id,
                 "image_id": image_id,
                 "url": result["url"],
                 "width": result["width"],
@@ -134,6 +135,7 @@ async def regenerate_image_api(
             "code": 200,
             "msg": "success",
             "data": {
+                "id": new_image.id,
                 "image_id": new_image_id,
                 "url": result["url"],
                 "width": result["width"],
@@ -211,6 +213,7 @@ async def generate_image_from_content_api(
             "code": 200,
             "msg": "success",
             "data": {
+                "id": new_image.id,
                 "image_id": image_id,
                 "url": result["url"],
                 "width": result["width"],
